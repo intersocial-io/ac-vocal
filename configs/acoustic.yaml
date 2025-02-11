@@ -70,7 +70,7 @@ sampling_steps: 20
 diff_accelerator: ddim
 diff_speedup: 10
 hidden_size: 256
-backbone_type: 'lynxnet'
+backbone_type: 'neoformer'
 backbone_args:
   num_channels: 1024
   num_layers: 6
