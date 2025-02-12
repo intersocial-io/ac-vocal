@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from modules.commons.common_layers import SinusoidalPosEmb
 from utils.hparams import hparams
 
+@torch.jit.script
 def RoPE(Q, K):
     # Split
     w = Q.size(-1) // 4
@@ -59,12 +60,12 @@ class NeoformerMHA(nn.Module):
             return self.__forward(x, cond)
 
 class NeoformerMLP(nn.Module):
-    def __init__(self, feat=512):
+    def __init__(self, feat=512, kernel_size=21):
         super().__init__()
         self.mainer = nn.Sequential(
             nn.Conv1d(feat, feat * 2, 1),
             nn.SiLU(),
-            nn.Conv1d(feat * 2, feat * 2, 21, groups=feat * 2, padding="same")
+            nn.Conv1d(feat * 2, feat * 2, kernel_size, groups=feat * 2, padding="same")
         )
         self.gate = nn.Sequential(
             nn.Conv1d(feat, feat * 2, 1),
@@ -75,17 +76,17 @@ class NeoformerMLP(nn.Module):
         return x + self.deposer(self.mainer(x) * self.gate(x))
 
 class NeoformerCell(nn.Module):
-    def __init__(self, feat=512, feat_cond=256, heads=4, is_first=False):
+    def __init__(self, feat=512, feat_cond=256, heads=4, kernel_size=21, is_first=False):
         super().__init__()
         if is_first:
             self.norm1 = nn.Identity()
         else:
             self.norm1 = nn.LayerNorm(feat)
         self.self_attn = NeoformerMHA(feat, heads)
-        self.mlp1 = NeoformerMLP(feat)
+        self.mlp1 = NeoformerMLP(feat, kernel_size)
         self.norm2 = nn.LayerNorm(feat)
         self.cross_attn = NeoformerMHA(feat, heads, feat_cond)
-        self.mlp2 = NeoformerMLP(feat)
+        self.mlp2 = NeoformerMLP(feat, kernel_size)
     def forward(self, x, cond):
         x = self.norm1(x.transpose(-1, -2)).transpose(-1, -2)
         x = self.self_attn(x)
@@ -96,13 +97,13 @@ class NeoformerCell(nn.Module):
         return x
 
 class NeoformerBackbone(nn.Module):
-    def __init__(self, feat=512, layers=5, feat_cond=256, cond_latent=1024, heads=4):
+    def __init__(self, feat=512, layers=5, feat_cond=256, kernel_size=21, cond_latent=1024, heads=4):
         super().__init__()
         self.cond_reposer = nn.Sequential(
             nn.Conv1d(feat_cond, cond_latent, 1),
             nn.SiLU()
         )
-        self.cells = nn.ModuleList([ NeoformerCell(feat, cond_latent, heads, i == 0) for i in range(0, layers) ])
+        self.cells = nn.ModuleList([ NeoformerCell(feat, cond_latent, heads, kernel_size, i == 0) for i in range(0, layers) ])
     def forward(self, x, cond):
         cond = self.cond_reposer(cond)
         for cell in self.cells:
@@ -110,7 +111,7 @@ class NeoformerBackbone(nn.Module):
         return x
 
 class DiffsingerNeoformer(nn.Module):
-    def __init__(self, in_dims, n_feats, *, num_layers=6, num_channels=512, num_heads=4, cond_latent=1024):
+    def __init__(self, in_dims, n_feats, *, num_layers=6, num_channels=512, num_heads=4, kernel_size=21, cond_latent=1024):
         super().__init__()
         self.in_dims = in_dims
         self.n_feats = n_feats
@@ -125,6 +126,7 @@ class DiffsingerNeoformer(nn.Module):
             feat=num_channels,
             layers=num_layers,
             feat_cond=hparams['hidden_size'],
+            kernel_size=kernel_size,
             cond_latent=cond_latent,
             heads=num_heads
         )
